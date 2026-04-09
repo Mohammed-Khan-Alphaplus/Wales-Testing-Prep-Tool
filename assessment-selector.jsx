@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 
 const SUBJECTS = [
   "English Reading",
@@ -1232,39 +1232,6 @@ export default function AssessmentSelector() {
             </button>
           </div>
           {error && <p className="err">{error}</p>}
-
-          <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
-            <p style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
-              Learner Pool — for Wales Auto Scheduler export (optional)
-            </p>
-            <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>
-              Upload your <strong style={{ color: "var(--text)" }}>Credentials for OPA school - Learners</strong> spreadsheet.
-              Expects columns: <code>Forename(s)</code>, <code>Surname</code>, <code>Year</code>.
-              One random learner per year group will be assigned to each assessment row.
-            </p>
-            <label className="btn btn-ghost" style={{ display: "inline-block", cursor: "pointer" }}>
-              Upload Learners CSV / TSV
-              <input
-                type="file"
-                accept=".csv,.tsv,.txt"
-                style={{ display: "none" }}
-                onChange={e => {
-                  const file = e.target.files[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = ev => parseLearnerCSV(ev.target.result);
-                  reader.readAsText(file);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            {learners.length > 0 && (
-              <span style={{ marginLeft: 12, fontSize: 13, color: "var(--accent3)" }}>
-                ✓ {learners.length} learners loaded
-              </span>
-            )}
-            {learnerError && <p className="err">{learnerError}</p>}
-          </div>
         </div>
       )}
 
