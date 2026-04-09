@@ -20,10 +20,6 @@ const BANDS = ["LP", "UP", "SE"];
 
 const BAND_LABELS = { LP: "Lower Primary (2–3)", UP: "Upper Primary (4–6)", SE: "Secondary (7–9)" };
 
-const LEARNER_BY_YEAR = {
-  "2": "Luke Travers", "3": "Pheobe Miles", "4": "Danesh Ebi", "5": "Kasia Ewas",
-  "6": "Susie Ching", "7": "Helena Buckley", "8": "Candice Appleby", "9": "Edward Cash",
-};
 
 function classifySubject(subject, yearGroup) {
   const s = (subject || "").trim().toLowerCase();
@@ -148,6 +144,32 @@ export default function AssessmentSelector() {
   const [headers, setHeaders] = useState([]);
   const [step, setStep] = useState("input"); // input | map | results
   const [totalPicks, setTotalPicks] = useState(32);
+  const [learners, setLearners] = useState([]);
+  const [learnerError, setLearnerError] = useState("");
+
+  const parseLearnerCSV = useCallback((text) => {
+    const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) { setLearnerError("Need at least a header row and one learner row."); return; }
+    const sep = lines[0].includes("\t") ? "\t" : ",";
+    const hdrs = lines[0].split(sep).map(h => h.trim().replace(/^"|"$/g, "").toLowerCase());
+    const forenameIdx = hdrs.findIndex(h => /forename|first.?name/i.test(h));
+    const surnameIdx = hdrs.findIndex(h => /surname|last.?name/i.test(h));
+    const yearIdx = hdrs.findIndex(h => /^year$/i.test(h));
+    if (forenameIdx === -1 || surnameIdx === -1 || yearIdx === -1) {
+      setLearnerError("Could not find Forename(s), Surname, and Year columns.");
+      return;
+    }
+    const parsed = lines.slice(1).map(line => {
+      const vals = line.split(sep).map(v => v.trim().replace(/^"|"$/g, ""));
+      return {
+        name: `${vals[forenameIdx] || ""} ${vals[surnameIdx] || ""}`.trim(),
+        year: (vals[yearIdx] || "").replace(/\D/g, ""),
+      };
+    }).filter(l => l.name && l.year);
+    if (parsed.length === 0) { setLearnerError("No valid learner rows found."); return; }
+    setLearners(parsed);
+    setLearnerError("");
+  }, []);
 
   const parseCSV = useCallback((text) => {
     const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
@@ -230,9 +252,26 @@ export default function AssessmentSelector() {
 
   const exportAAT = useCallback(() => {
     if (!result) return;
+
+    // Build a shuffled pool per year, drawn down as rows are assigned
+    const poolByYear = {};
+    for (const l of learners) {
+      if (!poolByYear[l.year]) poolByYear[l.year] = [];
+      poolByYear[l.year].push(l.name);
+    }
+    for (const yr of Object.keys(poolByYear)) poolByYear[yr] = shuffle(poolByYear[yr]);
+    const usedByYear = {};
+
     const rows = result.selected.map(f => {
       const yr = (f.yearGroup || "").replace(/\D/g, "");
-      const learner = LEARNER_BY_YEAR[yr] || "Unknown Learner";
+      let learnerName = "Unknown Learner";
+      if (poolByYear[yr] && poolByYear[yr].length > 0) {
+        if (!usedByYear[yr]) usedByYear[yr] = 0;
+        const idx = usedByYear[yr] % poolByYear[yr].length;
+        learnerName = poolByYear[yr][idx];
+        usedByYear[yr]++;
+      }
+
       let lang = "";
       let aType = "";
       const isReasoning = f.subject.includes("Reasoning");
@@ -250,14 +289,13 @@ export default function AssessmentSelector() {
         lang = isWelsh ? "Welsh" : "English";
       }
 
-      // Suffix: Reasoning uses ASCII hyphen -, everything else uses en dash –
       if (f.type === "Modified") {
         aType += isReasoning ? " - MLP user" : " \u2013 MLP user";
       } else if (f.type === "Braille") {
         aType += isReasoning ? " - Braille user" : " \u2013 Braille user";
       }
 
-      return `${aType},${lang},${yr},${learner}`;
+      return `${aType},${lang},${yr},${learnerName}`;
     });
     const hdr = "Assessment Type,Language,Year Group,Learner Name";
     const blob = new Blob([hdr + "\n" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
@@ -265,9 +303,9 @@ export default function AssessmentSelector() {
     const a = document.createElement("a");
     a.href = url; a.download = "aat_schedule.csv"; a.click();
     URL.revokeObjectURL(url);
-  }, [result]);
+  }, [result, learners]);
 
-  const reset = () => { setStep("input"); setForms([]); setResult(null); setError(""); setRawData(""); };
+  const reset = () => { setStep("input"); setForms([]); setResult(null); setError(""); setRawData(""); setLearners([]); setLearnerError(""); };
 
   return (
     <div style={{
@@ -363,7 +401,7 @@ export default function AssessmentSelector() {
 
       {step === "input" && (
         <div className="section">
-          <h2>01 — Paste Data</h2>
+          <h2>01 — Paste Assessment Data</h2>
           <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>
             Paste CSV or tab-separated data with headers. Needs columns for Subject, Type, and Year Group at minimum.
           </p>
@@ -382,6 +420,39 @@ export default function AssessmentSelector() {
             </button>
           </div>
           {error && <p className="err">{error}</p>}
+
+          <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
+            <p style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
+              Learner Pool — for AAT CSV export (optional)
+            </p>
+            <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>
+              Upload your <strong style={{ color: "var(--text)" }}>Credentials for OPA school - Learners</strong> spreadsheet.
+              Expects columns: <code>Forename(s)</code>, <code>Surname</code>, <code>Year</code>.
+              One random learner per year group will be assigned to each assessment row.
+            </p>
+            <label className="btn btn-ghost" style={{ display: "inline-block", cursor: "pointer" }}>
+              Upload Learners CSV / TSV
+              <input
+                type="file"
+                accept=".csv,.tsv,.txt"
+                style={{ display: "none" }}
+                onChange={e => {
+                  const file = e.target.files[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = ev => parseLearnerCSV(ev.target.result);
+                  reader.readAsText(file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {learners.length > 0 && (
+              <span style={{ marginLeft: 12, fontSize: 13, color: "var(--accent3)" }}>
+                ✓ {learners.length} learners loaded
+              </span>
+            )}
+            {learnerError && <p className="err">{learnerError}</p>}
+          </div>
         </div>
       )}
 
